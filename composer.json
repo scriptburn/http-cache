@@ -1,0 +1,22 @@
+{
+  "name": "scriptburn/http-cache",
+  "description": "Simle package tio cache http get requests ",
+  "keywords": ["http", "cache"],
+  "license": "BSD-3-Clause",
+  "authors": [
+    {
+      "name": "Rajneesh ojha",
+      "email": "contact@scriptburn.com"
+    }
+  ],
+  "require": {
+    "php": ">=5.4.0",
+    "phpFastCache/phpFastCache": ">=6.0",
+  "guzzlehttp/guzzle": ">=6.3"
+  },
+  "autoload": {
+    "psr-4": {
+            "Scriptburn\\Cache\\": "src/"
+    }
+  }
+}
