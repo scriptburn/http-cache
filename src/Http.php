@@ -6,21 +6,40 @@ use \phpFastCache\CacheManager;
 
 class Http
 {
-    private $cache, $logger;
+    private $cache, $logger, $logHandler;
     public function __construct($cachePath, $logger = null)
     {
-        //p_d(rtrim($cachePath, "/"));
         $this->logger = $logger;
         $this->cache  = CacheManager::getInstance('files', ["path" => rtrim($cachePath, "/")]);
+
+        if (is_null($this->logger))
+        {
+            $this->logHandler = function ($msg)
+            {
+                return;
+            };
+        }
+        elseif (is_callable($this->logger))
+        {
+            $this->logHandler = function ($msg)
+            {
+                call_user_func_array($this->logger, [$msg]);
+            };
+
+        }
+        elseif (is_object($this->logger) && method_exists($this->logger, 'info'))
+        {
+            $this->logHandler = function ($msg)
+            {
+                $this->logger->info($message);
+            };
+        }
+
     }
 
     public function log($message)
     {
-        if (is_null($this->logger))
-        {
-            return;
-        }
-        $this->logger->info($message);
+        call_user_func_array($this->logHandler, [$message]);
     }
     public function request($action, $url, $data = [], $options = [])
     {
@@ -29,13 +48,7 @@ class Http
             $default_options = [\GuzzleHttp\RequestOptions::HEADERS => [
                 'User-Agent' => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36',
             ]];
-            if (trim(strtolower($action)) == 'post')
-            {
-                if (empty($options[\GuzzleHttp\RequestOptions::JSON]))
-                {
-                    $options[\GuzzleHttp\RequestOptions::JSON] = $data;
-                }
-            }
+
             $options = array_merge($default_options, $options);
 
             $client   = new \GuzzleHttp\Client();
@@ -62,12 +75,12 @@ class Http
             }
 
             $result = [
-                'status'   => false,
-                'body'     => is_null($response) ? '' : (string) $response->getBody()->getContents(),
-                'response' => $response,
-                'code'     => is_null($response) ? 0 : $response->getStatusCode(),
-                'error'    => $e,
-                'message'  => $e->getMessage(),
+                'status'        => false,
+                'body'          => is_null($response) ? '' : (string) $response->getBody()->getContents(),
+                'response'      => $response,
+                'response_code' => is_null($response) ? 0 : $response->getStatusCode(),
+                'error'         => $e,
+                'message'       => $e->getMessage(),
             ];
         }
         return (object) $result;
@@ -168,10 +181,12 @@ class Http
         }
     }
 
-    public function cache($action, $resource, $data = [], $options = [])
+    public function cache($url, $options = [])
     {
-        $this->log("Executing $action for $resource");
-        $mayCache = $this->mayCache($action, $resource, $options);
+        $action = 'get';
+        $this->log("fetch cache for $url");
+        $options['cache']['enabled'] = 1;
+        $mayCache                    = $this->mayCache($action, $url, $options);
 
         if (!is_callable($mayCache))
         {
@@ -181,8 +196,8 @@ class Http
         {
             $result = $this->request(
                 $action,
-                $resource,
-                $data,
+                $url,
+                [],
                 $options);
 
             if ($result->status)
