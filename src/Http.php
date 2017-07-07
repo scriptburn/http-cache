@@ -1,6 +1,7 @@
 <?php
 namespace Scriptburn\Cache;
 
+use GuzzleHttp\Cookie\FileCookieJar;
 use \GuzzleHttp\Client;
 use \phpFastCache\CacheManager;
 
@@ -31,7 +32,7 @@ class Http
         {
             $this->logHandler = function ($msg)
             {
-                $this->logger->info($message);
+                $this->logger->info($msg);
             };
         }
 
@@ -50,9 +51,13 @@ class Http
             ]];
 
             $options = array_merge($default_options, $options);
+            if (isset($options['cookie_file']) && empty($options['cookies']))
+            {
+                $options['cookies'] = new FileCookieJar($options['cookie_file']);
 
-            $client   = new \GuzzleHttp\Client();
-            $response = $client->request(trim(strtolower($action)), $url, $options);
+            }
+             $client   = new \GuzzleHttp\Client($options);
+            $response = $client->request(trim(strtolower($action)), $url, $data);
 
             $result['status']   = true;
             $result['body']     = (string) $response->getBody()->getContents();
@@ -71,7 +76,7 @@ class Http
                 || $e instanceof \Exception
             )
             {
-                $response = $e->getResponse();
+                $response = method_exists($e, 'getResponse') ? $e->getResponse() : null;
             }
 
             $result = [
