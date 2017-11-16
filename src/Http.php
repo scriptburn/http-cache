@@ -126,67 +126,92 @@ class Http
 
     public function mayCache($action, $resource, $options)
     {
-        $cache_options = $this->parseCacheOptions($action, $resource, $options);
+        try
+        {
+            $cache_options = $this->parseCacheOptions($action, $resource, $options);
 
-        $cached_item = $this->cache->getItem($cache_options['key']);
-        $cached_item_data = $cached_item->get();
-        $is_cached = true;
-        if (isset($cache_options['reset']) && $cache_options['reset'] && !is_null($cached_item_data))
-        {
-            $tm = microtime(true);
-            $this->log("Doing cache reset for url $resource ");
-            $this->cache->deleteItem($cache_options['key']);
-            $this->log("Cache reset done in ".(number_format(microtime(true) - $tm, 2)));
-            $is_cached = false;
-        }
-        if ($cache_options['enabled'] && $is_cached && !is_null($cached_item_data))
-        {
-            $cached_item = null;
-            $this->log("Cache found for url $resource");
-
-            return (object) ['status' => 1, 'body' => $cached_item_data];
-        }
-        else
-        {
-            return function ($result) use ($resource, $cache_options, $action)
+            $cached_item = $this->cache->getItem($cache_options['key']);
+            $cached_item_data = $cached_item->get();
+            $is_cached = true;
+            if (isset($cache_options['reset']) && $cache_options['reset'] && !is_null($cached_item_data))
             {
-                if (!$cache_options['enabled'])
+                $tm = microtime(true);
+                $this->log("Doing cache reset for url $resource ");
+                $this->cache->deleteItem($cache_options['key']);
+                $this->log("Cache reset done in ".(number_format(microtime(true) - $tm, 2)));
+                $is_cached = false;
+            }
+            if ($cache_options['enabled'] && $is_cached && !is_null($cached_item_data))
+            {
+                $cached_item = null;
+                $this->log("Cache found for url $resource");
+
+                return (object) ['status' => 1, 'body' => $cached_item_data ,'from_cache'=>1];
+            }
+            else
+            {
+                return function ($result) use ($resource, $cache_options, $action)
                 {
-                    return $result;
-                }
-                if (!empty($cache_options['signature']))
-                {
-                    if (stripos($result->body, $cache_options['signature']) === false)
+                    if (!$cache_options['enabled'])
+                    {
+                        return $result;
+                    }
+                    if (!empty($cache_options['signature']))
+                    {
+                        if (stripos($result->body, $cache_options['signature']) === false)
+                        {
+                            $result->status = 0;
+                            $result->message = "Singature {$cache_options['signature']} not found ";
+                            $result->invalid_signature = 1;
+
+                            return $result;
+                        }
+                    }
+
+                    $name = explode("/", $resource);
+                    $name = $name[count($name) - 1];
+
+                    $tm = microtime(true);
+                    // $cached_item= $this->cache->getItem($cache_options['key'])->set($data)->expiresAfter($cache_options['expire'])->addTag($name);
+                    // $cached_item->set($data)->expiresAfter($cache_options['expire'])->addTag($name); //in seconds, also accepts
+
+                    if (isset($cache_options['with_response_code']) && $result->code != $cache_options['with_response_code'])
                     {
                         $result->status = 0;
-                        $result->message = "Singature {$cache_options['signature']} not found ";
-                        $result->invalid_signature = 1;
+                        $result->message = "Response code is not same as expected response code ";
 
                         return $result;
                     }
-                }
+                    if (isset($cache_options['before_cache']) && is_callable($cache_options['before_cache']))
+                    {
+                        try
+                        {
+                            $data = call_user_func_array($cache_options['before_cache'], [$result->body, $action, $resource, $cache_options]);
+                        }
+                        catch (\Exception $e)
+                        {
+                            $this->log("Error occured in cache callback:".$e->getMessage());
 
-                $name = explode("/", $resource);
-                $name = $name[count($name) - 1];
+                            return (object) ['status' => 0, 'body' => "", 'message' => $e->getMessage()];
+                        }
+                    }
+                    else
+                    {
+                        $data = $result->body;
+                    }
+                    $this->log("Set cache data for url $resource  for ".($cache_options['expire'] == 0 ? 'infinite' : $cache_options['expire']));
 
-                $tm = microtime(true);
-                $this->log("Set cache data for url $resource  for ".($cache_options['expire'] == 0 ? 'infinite' : $cache_options['expire']));
-                // $cached_item= $this->cache->getItem($cache_options['key'])->set($data)->expiresAfter($cache_options['expire'])->addTag($name);
-                // $cached_item->set($data)->expiresAfter($cache_options['expire'])->addTag($name); //in seconds, also accepts
-                if (isset($cache_options['before_cache']) && is_callable($cache_options['before_cache']))
-                {
-                    $data = call_user_func_array($cache_options['before_cache'], [$result->body, $action, $resource, $cache_options]);
-                }
-                else
-                {
-                    $data = $result->body;
-                }
-                $this->cache->save($this->cache->getItem($cache_options['key'])->set($data)->expiresAfter($cache_options['expire'])->addTag($name));
-                // $cached_item=null;
-                $this->log("Cache data saved in ".(number_format(microtime(true) - $tm, 2)));
+                    $this->cache->save($this->cache->getItem($cache_options['key'])->set($data)->expiresAfter($cache_options['expire'])->addTag($name));
+                    // $cached_item=null;
+                    $this->log("Cache data saved in ".(number_format(microtime(true) - $tm, 2)));
 
-                return (object) ['status' => 1, 'body' => $data];
-            };
+                    return (object) ['status' => 1, 'body' => $data, 'response_code' => $result->code,'from_cache'=>0];
+                };
+            }
+        }
+        catch (\Exception $e)
+        {
+            return (object) ['status' => 0, 'body' => "", 'message' => $e->getMessage()];
         }
     }
 
